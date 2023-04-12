@@ -13,7 +13,7 @@ RUN apk add curl git zlib zlib-dev autoconf g++ make libpng-dev gifsicle alpine-
     && npm run build:production \
     && mv dist /dist
 
-FROM debian:stable-slim as app
+FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION} as app
 
 # https://askubuntu.com/questions/972516/debian-frontend-environment-variable
 ARG DEBIAN_FRONTEND="noninteractive"
@@ -73,7 +73,7 @@ COPY . .
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 # because of changes in docker and systemd we need to not build in parallel at the moment
 # see https://success.docker.com/article/how-to-reserve-resource-temporarily-unavailable-errors-due-to-tasksmax-setting
-RUN dotnet publish Jellyfin.Server --disable-parallel --configuration Release --output="/jellyfin" --self-contained --runtime linux-x64 -p:DebugSymbols=false -p:DebugType=none
+RUN dotnet publish Jellyfin.Server --disable-parallel --configuration Release --output="/jellyfin" --runtime linux-x64
 
 FROM app
 

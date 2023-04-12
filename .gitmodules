@@ -1,0 +1,3 @@
+[submodule "vendor/jellyfin"]
+	path = vendor/jellyfin
+	url = https://github.com/jellyfin/jellyfin.git
