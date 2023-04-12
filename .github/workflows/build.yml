@@ -51,3 +51,4 @@ jobs:
           cache-to: ${{ format('type=registry,ref={0}:cache,mode=max', env.IMAGE) || ''}}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: JELLYFIN_WEB_VERSION=v10.8.9
