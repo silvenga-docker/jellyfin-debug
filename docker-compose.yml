@@ -1,0 +1,6 @@
+version: "2.1"
+services:
+  tor:
+    build: .
+    ports:
+      - 8080:80
