@@ -2,7 +2,7 @@
 #####################################
 # Requires binfm_misc registration
 # https://github.com/multiarch/qemu-user-static#binfmt_misc-register
-ARG DOTNET_VERSION=7.0
+ARG DOTNET_VERSION=6.0
 
 FROM node:lts-alpine as web-builder
 ARG JELLYFIN_WEB_VERSION=master
@@ -69,18 +69,18 @@ ENV LANGUAGE en_US:en
 
 FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} as builder
 WORKDIR /repo
-COPY . .
+COPY ./jellyfin .
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 # because of changes in docker and systemd we need to not build in parallel at the moment
 # see https://success.docker.com/article/how-to-reserve-resource-temporarily-unavailable-errors-due-to-tasksmax-setting
-RUN dotnet publish Jellyfin.Server --disable-parallel --configuration Release --output="/jellyfin" --runtime linux-x64
+RUN dotnet publish Jellyfin.Server --output="/jellyfin" --runtime linux-x64
 
 FROM app
 
 ENV HEALTHCHECK_URL=http://localhost:8096/health
 
 COPY --from=builder /jellyfin /jellyfin
-COPY --from=web-builder /dist /jellyfin/jellyfin-web
+# COPY --from=web-builder /dist /jellyfin/jellyfin-web
 
 EXPOSE 8096
 VOLUME /cache /config
@@ -90,7 +90,8 @@ ENTRYPOINT ["./jellyfin/jellyfin", \
 ENV JELLYFIN_DATA_DIR="/config/data" \
     JELLYFIN_CONFIG_DIR="/config" \
     JELLYFIN_LOG_DIR="/config/log" \
-    JELLYFIN_CACHE_DIR="/config/cache"
+    JELLYFIN_CACHE_DIR="/config/cache" \
+    JELLYFIN_NOWEBCONTENT=true
 
 HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
     CMD curl -Lk -fsS "${HEALTHCHECK_URL}" || exit 1

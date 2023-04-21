@@ -1,8 +1,0 @@
-version: "2.1"
-services:
-  tor:
-    build:
-      context: vendor/jellyfin
-      dockerfile: Dockerfile
-    ports:
-      - 8080:80

@@ -13,8 +13,14 @@ jobs:
     permissions:
       packages: write
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        type:
+          - jellyfin
+          - jellyfin-web
     env:
-      IMAGE: ghcr.io/${{ github.repository }}
+      IMAGE: ghcr.io/${{ github.repository }}/${{ matrix.type }}
+      CONTEXT: ./src/${{ matrix.type }}
     steps:
       - uses: docker/setup-buildx-action@v2
         with:
@@ -43,12 +49,11 @@ jobs:
       - uses: docker/build-push-action@v4
         id: build
         with:
-          file: Dockerfile
-          context: vendor/jellyfin
+          file: ${{ env.CONTEXT }}/Dockerfile
+          context: ${{ env.CONTEXT }}
           push: true
           pull: true
           cache-from: ${{ format('type=registry,ref={0}:cache', env.IMAGE) || ''}}
           cache-to: ${{ format('type=registry,ref={0}:cache,mode=max', env.IMAGE) || ''}}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: JELLYFIN_WEB_VERSION=0ae0db8ebbe8d518d7653f33762aa5633cbaa7d6

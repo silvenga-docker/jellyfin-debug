@@ -1,3 +1,6 @@
 [submodule "vendor/jellyfin"]
-	path = vendor/jellyfin
+	path = src/jellyfin/jellyfin
 	url = https://github.com/jellyfin/jellyfin.git
+[submodule "vendor/jellyfin-web"]
+	path = src/jellyfin-web/jellyfin-web
+	url = https://github.com/jellyfin/jellyfin-web.git
