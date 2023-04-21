@@ -85,13 +85,13 @@ COPY --from=builder /jellyfin /jellyfin
 EXPOSE 8096
 VOLUME /cache /config
 ENTRYPOINT ["./jellyfin/jellyfin", \
-    "--ffmpeg", "/usr/lib/jellyfin-ffmpeg/ffmpeg"]
+    "--ffmpeg", "/usr/lib/jellyfin-ffmpeg/ffmpeg", \
+    "--nowebclient"]
 
 ENV JELLYFIN_DATA_DIR="/config/data" \
     JELLYFIN_CONFIG_DIR="/config" \
     JELLYFIN_LOG_DIR="/config/log" \
-    JELLYFIN_CACHE_DIR="/config/cache" \
-    JELLYFIN_NOWEBCONTENT=true
+    JELLYFIN_CACHE_DIR="/config/cache"
 
 HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
     CMD curl -Lk -fsS "${HEALTHCHECK_URL}" || exit 1
