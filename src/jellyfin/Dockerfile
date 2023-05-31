@@ -95,3 +95,5 @@ ENV JELLYFIN_DATA_DIR="/config/data" \
 
 HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
     CMD curl -Lk -fsS "${HEALTHCHECK_URL}" || exit 1
+
+ENV DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE=false
