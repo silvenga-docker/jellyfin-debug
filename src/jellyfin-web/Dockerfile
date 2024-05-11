@@ -1,15 +1,35 @@
-FROM node:lts-alpine as web-builder
+ARG NODEJS_VERSION=20
 
-RUN apk add curl git zlib zlib-dev autoconf g++ make libpng-dev gifsicle alpine-sdk automake libtool make gcc musl-dev nasm python3
+FROM node:${NODEJS_VERSION}-alpine as web
 
-WORKDIR /source
-COPY jellyfin-web/ .
+ARG SOURCE_DIR=/src
+ARG ARTIFACT_DIR=/web
 
-RUN set -xe \
-    && npm ci --no-audit --unsafe-perm \
-    && npm run build:production
+ARG JELLYFIN_VERSION
+ENV JELLYFIN_VERSION=${JELLYFIN_VERSION}
+
+RUN apk add \
+    autoconf \
+    g++ \
+    make \
+    libpng-dev \
+    gifsicle \
+    alpine-sdk \
+    automake \
+    libtool \
+    gcc \
+    musl-dev \
+    nasm \
+    python3
+
+WORKDIR ${SOURCE_DIR}
+COPY jellyfin-web .
+
+RUN npm ci --no-audit --unsafe-perm \
+    && npm run build:production \
+    && mv dist ${ARTIFACT_DIR}
 
 FROM nginx:stable
 
-COPY --from=web-builder /source/dist /jellyfin-web
+COPY --from=web ${ARTIFACT_DIR} /jellyfin-web
 COPY rootfs/ /
