@@ -20,13 +20,13 @@ ARG MALI_PKG_TAG=v1.9-1-55611b0
 ARG MALI_PKG_CFG=valhall-g610-g13p0-gbm
 
 # Debian architecture (amd64, arm64, armhf), set by build script
-ARG PACKAGE_ARCH
+ARG PACKAGE_ARCH=amd64
 # Dotnet architeture (x64, arm64, arm), set by build script
-ARG DOTNET_ARCH
+ARG DOTNET_ARCH=x64
 # QEMU architecture (x86_64, aarch64, arm), set by build script
-ARG QEMU_ARCH
+ARG QEMU_ARCH=x86_64
 # Base Image archiecture (amd64, arm64v8, arm32v7), set by build script
-ARG IMAGE_ARCH
+ARG IMAGE_ARCH=amd64
 
 # Jellyfin version
 ARG JELLYFIN_VERSION
@@ -74,18 +74,18 @@ ARG SOURCE_DIR=/src
 ARG ARTIFACT_DIR=/server
 
 WORKDIR ${SOURCE_DIR}
-COPY jellyfin-server .
+COPY jellyfin .
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 
 RUN dotnet publish Jellyfin.Server --configuration Release \
-    --output="${ARTIFACT_DIR}" --self-contained \
-    --runtime linux-${DOTNET_ARCH} -p:DebugSymbols=false -p:DebugType=none
+    --output="${ARTIFACT_DIR}" \
+    --runtime linux-${DOTNET_ARCH}
 
 #
 # Build the final combined image
 #
 FROM multiarch/qemu-user-static:x86_64-${QEMU_ARCH} as qemu
-FROM ${IMAGE_ARCH}/debian:${OS_VERSION}-slim as combined
+FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION} as combined
 
 ARG OS_VERSION
 ARG FFMPEG_PACKAGE
@@ -114,9 +114,9 @@ ENV DEBIAN_FRONTEND="noninteractive" \
     LC_ALL="en_US.UTF-8" \
     LANG="en_US.UTF-8" \
     LANGUAGE="en_US:en" \
-    JELLYFIN_DATA_DIR="/config" \
-    JELLYFIN_CACHE_DIR="/cache" \
-    JELLYFIN_CONFIG_DIR="/config/config" \
+    JELLYFIN_DATA_DIR="/config/data" \
+    JELLYFIN_CACHE_DIR="/config/cache" \
+    JELLYFIN_CONFIG_DIR="/config" \
     JELLYFIN_LOG_DIR="/config/log" \
     JELLYFIN_WEB_DIR="/jellyfin/jellyfin-web" \
     JELLYFIN_FFMPEG="/usr/lib/jellyfin-ffmpeg/ffmpeg"
@@ -191,12 +191,15 @@ RUN mkdir -p ${JELLYFIN_DATA_DIR} ${JELLYFIN_CACHE_DIR} \
     && chmod 777 ${JELLYFIN_DATA_DIR} ${JELLYFIN_CACHE_DIR}
 
 COPY --from=server /server /jellyfin
-COPY --from=web /web /jellyfin/jellyfin-web
+# COPY --from=web /web /jellyfin/jellyfin-web
 
 EXPOSE 8096
 VOLUME ${JELLYFIN_DATA_DIR} ${JELLYFIN_CACHE_DIR}
 ENTRYPOINT [ "/jellyfin/jellyfin", \
-    "--ffmpeg", "/usr/lib/jellyfin-ffmpeg/ffmpeg" ]
+    "--ffmpeg", "/usr/lib/jellyfin-ffmpeg/ffmpeg", \
+    "--nowebclient" ]
 
 HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
     CMD curl -Lk -fsS "${HEALTHCHECK_URL}" || exit 1
+
+ENV DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE=false
