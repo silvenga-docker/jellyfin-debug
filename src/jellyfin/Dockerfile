@@ -1,99 +1,202 @@
-# DESIGNED FOR BUILDING ON AMD64 ONLY
-#####################################
-# Requires binfm_misc registration
-# https://github.com/multiarch/qemu-user-static#binfmt_misc-register
-ARG DOTNET_VERSION=6.0
+# Docker build arguments
+ARG DOTNET_VERSION=8.0
+ARG NODEJS_VERSION=20
 
-FROM node:lts-alpine as web-builder
-ARG JELLYFIN_WEB_VERSION=master
-RUN apk add curl git zlib zlib-dev autoconf g++ make libpng-dev gifsicle alpine-sdk automake libtool make gcc musl-dev nasm python3 \
-    && curl -L https://github.com/jellyfin/jellyfin-web/archive/${JELLYFIN_WEB_VERSION}.tar.gz | tar zxf - \
-    && cd jellyfin-web-* \
-    && npm ci --no-audit --unsafe-perm \
-    && npm run build:production \
-    && mv dist /dist
+# Combined image version (Debian)
+ARG OS_VERSION=bookworm
 
-FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION} as app
-
-# https://askubuntu.com/questions/972516/debian-frontend-environment-variable
-ARG DEBIAN_FRONTEND="noninteractive"
-# http://stackoverflow.com/questions/48162574/ddg#49462622
-ARG APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=DontWarn
-# https://github.com/NVIDIA/nvidia-docker/wiki/Installation-(Native-GPU-Support)
-ENV NVIDIA_DRIVER_CAPABILITIES="compute,video,utility"
+# Jellyfin FFMPEG package
+ARG FFMPEG_PACKAGE=jellyfin-ffmpeg6
 
 # https://github.com/intel/compute-runtime/releases
-ARG GMMLIB_VERSION=22.0.2
-ARG IGC_VERSION=1.0.10395
-ARG NEO_VERSION=22.08.22549
-ARG LEVEL_ZERO_VERSION=1.3.22549
+ARG GMMLIB_VERSION=22.3.18
+ARG IGC_VERSION=1.0.16510.2
+ARG NEO_VERSION=24.13.29138.7
+ARG LEVEL_ZERO_VERSION=1.3.29138.7
 
-# Install dependencies:
-# mesa-va-drivers: needed for AMD VAAPI. Mesa >= 20.1 is required for HEVC transcoding.
-# curl: healthcheck
-RUN apt-get update \
-    && apt-get install --no-install-recommends --no-install-suggests -y ca-certificates gnupg wget curl \
-    && wget -O - https://repo.jellyfin.org/jellyfin_team.gpg.key | apt-key add - \
-    && echo "deb [arch=$( dpkg --print-architecture )] https://repo.jellyfin.org/$( awk -F'=' '/^ID=/{ print $NF }' /etc/os-release ) $( awk -F'=' '/^VERSION_CODENAME=/{ print $NF }' /etc/os-release ) main" | tee /etc/apt/sources.list.d/jellyfin.list \
-    && apt-get update \
-    && apt-get install --no-install-recommends --no-install-suggests -y \
-    mesa-va-drivers \
-    jellyfin-ffmpeg5 \
-    openssl \
-    locales \
-    # Intel VAAPI Tone mapping dependencies:
-    # Prefer NEO to Beignet since the latter one doesn't support Comet Lake or newer for now.
-    # Do not use the intel-opencl-icd package from repo since they will not build with RELEASE_WITH_REGKEYS enabled.
-    && mkdir intel-compute-runtime \
-    && cd intel-compute-runtime \
-    && wget https://github.com/intel/compute-runtime/releases/download/${NEO_VERSION}/intel-gmmlib_${GMMLIB_VERSION}_amd64.deb \
-    && wget https://github.com/intel/intel-graphics-compiler/releases/download/igc-${IGC_VERSION}/intel-igc-core_${IGC_VERSION}_amd64.deb \
-    && wget https://github.com/intel/intel-graphics-compiler/releases/download/igc-${IGC_VERSION}/intel-igc-opencl_${IGC_VERSION}_amd64.deb \
-    && wget https://github.com/intel/compute-runtime/releases/download/${NEO_VERSION}/intel-opencl-icd_${NEO_VERSION}_amd64.deb \
-    && wget https://github.com/intel/compute-runtime/releases/download/${NEO_VERSION}/intel-level-zero-gpu_${LEVEL_ZERO_VERSION}_amd64.deb \
-    && dpkg -i *.deb \
-    && cd .. \
-    && rm -rf intel-compute-runtime \
-    && apt-get remove gnupg wget -y \
-    && apt-get clean autoclean -y \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /cache /config /media \
-    && chmod 777 /cache /config /media \
-    && sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && locale-gen
+# https://github.com/tsukumijima/libmali-rockchip
+ARG MALI_PKG_VER=1.9-1_arm64
+ARG MALI_PKG_TAG=v1.9-1-55611b0
+ARG MALI_PKG_CFG=valhall-g610-g13p0-gbm
 
-# ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
-ENV LC_ALL en_US.UTF-8
-ENV LANG en_US.UTF-8
-ENV LANGUAGE en_US:en
+# Debian architecture (amd64, arm64, armhf), set by build script
+ARG PACKAGE_ARCH
+# Dotnet architeture (x64, arm64, arm), set by build script
+ARG DOTNET_ARCH
+# QEMU architecture (x86_64, aarch64, arm), set by build script
+ARG QEMU_ARCH
+# Base Image archiecture (amd64, arm64v8, arm32v7), set by build script
+ARG IMAGE_ARCH
 
-FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} as builder
-WORKDIR /repo
-COPY ./jellyfin .
+# Jellyfin version
+ARG JELLYFIN_VERSION
+
+#
+# Build the web artifacts
+#
+FROM node:${NODEJS_VERSION}-alpine as web
+
+ARG SOURCE_DIR=/src
+ARG ARTIFACT_DIR=/web
+
+ARG JELLYFIN_VERSION
+ENV JELLYFIN_VERSION=${JELLYFIN_VERSION}
+
+RUN apk add \
+    autoconf \
+    g++ \
+    make \
+    libpng-dev \
+    gifsicle \
+    alpine-sdk \
+    automake \
+    libtool \
+    gcc \
+    musl-dev \
+    nasm \
+    python3
+
+WORKDIR ${SOURCE_DIR}
+COPY jellyfin-web .
+
+RUN npm ci --no-audit --unsafe-perm \
+    && npm run build:production \
+    && mv dist ${ARTIFACT_DIR}
+
+#
+# Build the server artifacts
+#
+FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION}-${OS_VERSION}-slim as server
+
+ARG DOTNET_ARCH
+
+ARG SOURCE_DIR=/src
+ARG ARTIFACT_DIR=/server
+
+WORKDIR ${SOURCE_DIR}
+COPY jellyfin-server .
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
-# because of changes in docker and systemd we need to not build in parallel at the moment
-# see https://success.docker.com/article/how-to-reserve-resource-temporarily-unavailable-errors-due-to-tasksmax-setting
-RUN dotnet publish Jellyfin.Server --output="/jellyfin" --runtime linux-x64
 
-FROM app
+RUN dotnet publish Jellyfin.Server --configuration Release \
+    --output="${ARTIFACT_DIR}" --self-contained \
+    --runtime linux-${DOTNET_ARCH} -p:DebugSymbols=false -p:DebugType=none
 
+#
+# Build the final combined image
+#
+FROM multiarch/qemu-user-static:x86_64-${QEMU_ARCH} as qemu
+FROM ${IMAGE_ARCH}/debian:${OS_VERSION}-slim as combined
+
+ARG OS_VERSION
+ARG FFMPEG_PACKAGE
+
+ARG GMMLIB_VERSION
+ARG IGC_VERSION
+ARG NEO_VERSION
+ARG LEVEL_ZERO_VERSION
+
+ARG MALI_PKG_VER
+ARG MALI_PKG_TAG
+ARG MALI_PKG_CFG
+
+ARG PACKAGE_ARCH
+ARG DOTNET_ARCH
+ARG QEMU_ARCH
+
+# Copy the QEMU runtime
+COPY --from=qemu /usr/bin/* /usr/bin
+
+# Set the health URL
 ENV HEALTHCHECK_URL=http://localhost:8096/health
 
-COPY --from=builder /jellyfin /jellyfin
-# COPY --from=web-builder /dist /jellyfin/jellyfin-web
+# Default environment variables for the Jellyfin invocation
+ENV DEBIAN_FRONTEND="noninteractive" \
+    LC_ALL="en_US.UTF-8" \
+    LANG="en_US.UTF-8" \
+    LANGUAGE="en_US:en" \
+    JELLYFIN_DATA_DIR="/config" \
+    JELLYFIN_CACHE_DIR="/cache" \
+    JELLYFIN_CONFIG_DIR="/config/config" \
+    JELLYFIN_LOG_DIR="/config/log" \
+    JELLYFIN_WEB_DIR="/jellyfin/jellyfin-web" \
+    JELLYFIN_FFMPEG="/usr/lib/jellyfin-ffmpeg/ffmpeg"
+
+# required for fontconfig cache
+ENV XDG_CACHE_HOME=${JELLYFIN_CACHE_DIR}
+
+# https://github.com/dlemstra/Magick.NET/issues/707#issuecomment-785351620
+ENV MALLOC_TRIM_THRESHOLD_=131072
+
+# https://github.com/NVIDIA/nvidia-docker/wiki/Installation-(Native-GPU-Support)
+ENV NVIDIA_VISIBLE_DEVICES="all"
+ENV NVIDIA_DRIVER_CAPABILITIES="compute,video,utility"
+
+# Install dependencies:
+RUN apt-get update \
+    && apt-get install --no-install-recommends --no-install-suggests --yes \
+    ca-certificates \
+    gnupg \
+    curl \
+    apt-transport-https \
+    && curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key \
+    | gpg --dearmor -o /etc/apt/trusted.gpg.d/debian-jellyfin.gpg \
+    && echo "deb [arch=${PACKAGE_ARCH}] https://repo.jellyfin.org/debian ${OS_VERSION} main" > /etc/apt/sources.list.d/jellyfin.list \
+    && apt-get update \
+    && apt-get install --no-install-recommends --no-install-suggests --yes \
+    ${FFMPEG_PACKAGE} \
+    openssl \
+    locales \
+    libfontconfig1 \
+    libfreetype6 \
+    && sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && locale-gen \
+    && apt-get remove gnupg apt-transport-https --yes \
+    && apt-get clean autoclean --yes \
+    && apt-get autoremove --yes \
+    && rm -rf /var/cache/apt/archives* /var/lib/apt/lists/*
+
+# Intel VAAPI Tone mapping dependencies:
+# Prefer NEO to Beignet since the latter one doesn't support Comet Lake or newer for now.
+# Do not use the intel-opencl-icd package from repo since they will not build with RELEASE_WITH_REGKEYS enabled.
+# https://github.com/intel/compute-runtime/releases
+RUN if test "${PACKAGE_ARCH}" = "amd64"; then \
+    mkdir intel-compute-runtime \
+    && cd intel-compute-runtime \
+    && curl -LO https://github.com/intel/intel-graphics-compiler/releases/download/igc-${IGC_VERSION}/intel-igc-core_${IGC_VERSION}_amd64.deb \
+    -LO https://github.com/intel/intel-graphics-compiler/releases/download/igc-${IGC_VERSION}/intel-igc-opencl_${IGC_VERSION}_amd64.deb \
+    -LO https://github.com/intel/compute-runtime/releases/download/${NEO_VERSION}/intel-opencl-icd_${NEO_VERSION}_amd64.deb \
+    -LO https://github.com/intel/compute-runtime/releases/download/${NEO_VERSION}/intel-level-zero-gpu_${LEVEL_ZERO_VERSION}_amd64.deb \
+    -LO https://github.com/intel/compute-runtime/releases/download/${NEO_VERSION}/libigdgmm12_${GMMLIB_VERSION}_amd64.deb \
+    && apt-get install --no-install-recommends --no-install-suggests -f -y ./*.deb \
+    && cd .. \
+    && rm -rf intel-compute-runtime \
+    ; fi \
+    && apt-get clean autoclean --yes \
+    && apt-get autoremove --yes \
+    && rm -rf /var/cache/apt/archives* /var/lib/apt/lists/*
+
+# Rockchip RK3588 libmali OpenCL dependencies:
+RUN if test "${PACKAGE_ARCH}" = "arm64"; then \
+    mkdir libmali-rockchip \
+    && cd libmali-rockchip \
+    && curl -LO https://github.com/tsukumijima/libmali-rockchip/releases/download/${MALI_PKG_TAG}/libmali-${MALI_PKG_CFG}_${MALI_PKG_VER}.deb \
+    && apt-get install --no-install-recommends --no-install-suggests -f -y ./*.deb \
+    && cd .. \
+    && rm -rf libmali-rockchip \
+    ; fi \
+    && apt-get clean autoclean --yes \
+    && apt-get autoremove --yes \
+    && rm -rf /var/cache/apt/archives* /var/lib/apt/lists/*
+
+RUN mkdir -p ${JELLYFIN_DATA_DIR} ${JELLYFIN_CACHE_DIR} \
+    && chmod 777 ${JELLYFIN_DATA_DIR} ${JELLYFIN_CACHE_DIR}
+
+COPY --from=server /server /jellyfin
+COPY --from=web /web /jellyfin/jellyfin-web
 
 EXPOSE 8096
-VOLUME /cache /config
-ENTRYPOINT ["./jellyfin/jellyfin", \
-    "--ffmpeg", "/usr/lib/jellyfin-ffmpeg/ffmpeg", \
-    "--nowebclient"]
-
-ENV JELLYFIN_DATA_DIR="/config/data" \
-    JELLYFIN_CONFIG_DIR="/config" \
-    JELLYFIN_LOG_DIR="/config/log" \
-    JELLYFIN_CACHE_DIR="/config/cache"
+VOLUME ${JELLYFIN_DATA_DIR} ${JELLYFIN_CACHE_DIR}
+ENTRYPOINT [ "/jellyfin/jellyfin", \
+    "--ffmpeg", "/usr/lib/jellyfin-ffmpeg/ffmpeg" ]
 
 HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
     CMD curl -Lk -fsS "${HEALTHCHECK_URL}" || exit 1
-
-ENV DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE=false
