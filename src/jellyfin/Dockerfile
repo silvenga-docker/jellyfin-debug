@@ -84,7 +84,6 @@ RUN dotnet publish Jellyfin.Server --configuration Release \
 #
 # Build the final combined image
 #
-FROM multiarch/qemu-user-static:x86_64-${QEMU_ARCH} as qemu
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION} as combined
 
 ARG OS_VERSION
@@ -101,10 +100,6 @@ ARG MALI_PKG_CFG
 
 ARG PACKAGE_ARCH
 ARG DOTNET_ARCH
-ARG QEMU_ARCH
-
-# Copy the QEMU runtime
-COPY --from=qemu /usr/bin/* /usr/bin
 
 # Set the health URL
 ENV HEALTHCHECK_URL=http://localhost:8096/health
