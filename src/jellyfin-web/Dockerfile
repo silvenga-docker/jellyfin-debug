@@ -31,5 +31,5 @@ RUN npm ci --no-audit --unsafe-perm \
 
 FROM nginx:stable
 
-COPY --from=web ${ARTIFACT_DIR} /jellyfin-web
+COPY --from=web /web /web
 COPY rootfs/ /
